@@ -9,7 +9,6 @@ import locality_aware_nms as nms_locality
 import lanms
 
 tf.app.flags.DEFINE_string('test_data_path', '/tmp/ch4_test_images/images/', '')
-tf.app.flags.DEFINE_string('gpu_list', '0', '')
 tf.app.flags.DEFINE_string('checkpoint_path', '/tmp/east_icdar2015_resnet_v1_50_rbox/', '')
 tf.app.flags.DEFINE_string('output_dir', '/tmp/ch4_test_images/images/', '')
 tf.app.flags.DEFINE_bool('no_write_images', False, 'do not write images')
@@ -82,20 +81,28 @@ def detect(score_map, geo_map, timer, score_map_thresh=0.8, box_thresh=0.1, nms_
     if len(score_map.shape) == 4:
         score_map = score_map[0, :, :, 0]
         geo_map = geo_map[0, :, :, ]
+
     # filter the score map
     xy_text = np.argwhere(score_map > score_map_thresh)
+
     # sort the text boxes via the y axis
     xy_text = xy_text[np.argsort(xy_text[:, 0])]
+
     # restore
     start = time.time()
+
     text_box_restored = restore_rectangle(xy_text[:, ::-1]*4, geo_map[xy_text[:, 0], xy_text[:, 1], :]) # N*4*2
     print('{} text boxes before nms'.format(text_box_restored.shape[0]))
+
     boxes = np.zeros((text_box_restored.shape[0], 9), dtype=np.float32)
     boxes[:, :8] = text_box_restored.reshape((-1, 8))
     boxes[:, 8] = score_map[xy_text[:, 0], xy_text[:, 1]]
+
     timer['restore'] = time.time() - start
+
     # nms part
     start = time.time()
+
     # boxes = nms_locality.nms_locality(boxes.astype(np.float64), nms_thres)
     boxes = lanms.merge_quadrangle_n9(boxes.astype('float32'), nms_thres)
     timer['nms'] = time.time() - start
@@ -124,8 +131,6 @@ def sort_poly(p):
 
 def main(argv=None):
     import os
-    os.environ['CUDA_VISIBLE_DEVICES'] = FLAGS.gpu_list
-
 
     try:
         os.makedirs(FLAGS.output_dir)
@@ -173,10 +178,7 @@ def main(argv=None):
 
                 # save to file
                 if boxes is not None:
-                    res_file = os.path.join(
-                        FLAGS.output_dir,
-                        '{}.txt'.format(
-                            os.path.basename(im_fn).split('.')[0]))
+                    res_file = os.path.join(FLAGS.output_dir, '{}.txt'.format(os.path.basename(im_fn).split('.')[0]))
 
                     with open(res_file, 'w') as f:
                         for box in boxes:
@@ -188,6 +190,7 @@ def main(argv=None):
                                 box[0, 0], box[0, 1], box[1, 0], box[1, 1], box[2, 0], box[2, 1], box[3, 0], box[3, 1],
                             ))
                             cv2.polylines(im[:, :, ::-1], [box.astype(np.int32).reshape((-1, 1, 2))], True, color=(255, 255, 0), thickness=1)
+
                 if not FLAGS.no_write_images:
                     img_path = os.path.join(FLAGS.output_dir, os.path.basename(im_fn))
                     cv2.imwrite(img_path, im[:, :, ::-1])

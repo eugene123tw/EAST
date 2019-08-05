@@ -14,8 +14,22 @@ import tensorflow as tf
 
 from data_util import GeneratorEnqueuer
 
-tf.app.flags.DEFINE_string('training_data_path', '/data/ocr/icdar2015/',
-                           'training dataset to use')
+tf.app.flags.DEFINE_string('training_image_path',
+                           '/home/eugene/_DATASETS/scene_text/ICDAR2015_Incidental /ch4_training_images',
+                           'training images')
+
+tf.app.flags.DEFINE_string('training_label_path',
+                           '/home/eugene/_DATASETS/scene_text/ICDAR2015_Incidental /ch4_training_localization_transcription_gt',
+                           'training labels')
+
+tf.app.flags.DEFINE_string('testing_image_path',
+                           '/home/eugene/_DATASETS/scene_text/ICDAR2015_Incidental /ch4_test_images',
+                           'testing images')
+
+tf.app.flags.DEFINE_string('testing_label_path',
+                           '/home/eugene/_DATASETS/scene_text/ICDAR2015_Incidental /Challenge4_Test_Task4_GT',
+                           'testing labels')
+
 tf.app.flags.DEFINE_integer('max_image_large_side', 1280,
                             'max image size of training')
 tf.app.flags.DEFINE_integer('max_text_size', 800,
@@ -37,7 +51,7 @@ def get_images():
     files = []
     for ext in ['jpg', 'png', 'jpeg', 'JPG']:
         files.extend(glob.glob(
-            os.path.join(FLAGS.training_data_path, '*.{}'.format(ext))))
+            os.path.join(FLAGS.training_image_path, '*.{}'.format(ext))))
     return files
 
 
@@ -585,8 +599,7 @@ def generator(input_size=512, batch_size=32,
               random_scale=np.array([0.5, 1, 2.0, 3.0]),
               vis=False):
     image_list = np.array(get_images())
-    print('{} training images in {}'.format(
-        image_list.shape[0], FLAGS.training_data_path))
+    print('{} training images in {}'.format(image_list.shape[0], FLAGS.training_image_path))
     index = np.arange(0, image_list.shape[0])
     while True:
         np.random.shuffle(index)
@@ -597,64 +610,68 @@ def generator(input_size=512, batch_size=32,
         training_masks = []
         for i in index:
             try:
-                im_fn = image_list[i]
-                im = cv2.imread(im_fn)
-                # print im_fn
-                h, w, _ = im.shape
-                txt_fn = im_fn.replace(os.path.basename(im_fn).split('.')[1], 'txt')
-                if not os.path.exists(txt_fn):
-                    print('text file {} does not exists'.format(txt_fn))
+                fname = image_list[i]
+                img = cv2.imread(fname)
+
+                h, w, _ = img.shape
+                gt_fname = os.path.join(FLAGS.training_label_path, 'gt_' + os.path.basename(fname).split('.')[0] + '.txt')
+                if not os.path.exists(gt_fname):
+                    print('Ground truth text file {} does not exists'.format(gt_fname))
                     continue
 
-                text_polys, text_tags = load_annoataion(txt_fn)
-
+                text_polys, text_tags = load_annoataion(gt_fname)
                 text_polys, text_tags = check_and_validate_polys(text_polys, text_tags, (h, w))
-                # if text_polys.shape[0] == 0:
-                #     continue
+
                 # random scale this image
                 rd_scale = np.random.choice(random_scale)
-                im = cv2.resize(im, dsize=None, fx=rd_scale, fy=rd_scale)
+                img = cv2.resize(img, dsize=None, fx=rd_scale, fy=rd_scale)
                 text_polys *= rd_scale
-                # print rd_scale
+
                 # random crop a area from image
                 if np.random.rand() < background_ratio:
+
                     # crop background
-                    im, text_polys, text_tags = crop_area(im, text_polys, text_tags, crop_background=True)
+                    img, text_polys, text_tags = crop_area(img, text_polys, text_tags, crop_background=True)
+
+                    # cannot find background
                     if text_polys.shape[0] > 0:
-                        # cannot find background
                         continue
+
                     # pad and resize image
-                    new_h, new_w, _ = im.shape
+                    new_h, new_w, _ = img.shape
                     max_h_w_i = np.max([new_h, new_w, input_size])
                     im_padded = np.zeros((max_h_w_i, max_h_w_i, 3), dtype=np.uint8)
-                    im_padded[:new_h, :new_w, :] = im.copy()
-                    im = cv2.resize(im_padded, dsize=(input_size, input_size))
+                    im_padded[:new_h, :new_w, :] = img.copy()
+                    img = cv2.resize(im_padded, dsize=(input_size, input_size))
                     score_map = np.zeros((input_size, input_size), dtype=np.uint8)
                     geo_map_channels = 5 if FLAGS.geometry == 'RBOX' else 8
                     geo_map = np.zeros((input_size, input_size, geo_map_channels), dtype=np.float32)
                     training_mask = np.ones((input_size, input_size), dtype=np.uint8)
                 else:
-                    im, text_polys, text_tags = crop_area(im, text_polys, text_tags, crop_background=False)
+
+                    img, text_polys, text_tags = crop_area(img, text_polys, text_tags, crop_background=False)
+
                     if text_polys.shape[0] == 0:
                         continue
-                    h, w, _ = im.shape
+
+                    h, w, _ = img.shape
 
                     # pad the image to the training input size or the longer side of image
-                    new_h, new_w, _ = im.shape
+                    new_h, new_w, _ = img.shape
                     max_h_w_i = np.max([new_h, new_w, input_size])
                     im_padded = np.zeros((max_h_w_i, max_h_w_i, 3), dtype=np.uint8)
-                    im_padded[:new_h, :new_w, :] = im.copy()
-                    im = im_padded
+                    im_padded[:new_h, :new_w, :] = img.copy()
+                    img = im_padded
                     # resize the image to input size
-                    new_h, new_w, _ = im.shape
+                    new_h, new_w, _ = img.shape
                     resize_h = input_size
                     resize_w = input_size
-                    im = cv2.resize(im, dsize=(resize_w, resize_h))
+                    img = cv2.resize(img, dsize=(resize_w, resize_h))
                     resize_ratio_3_x = resize_w/float(new_w)
                     resize_ratio_3_y = resize_h/float(new_h)
                     text_polys[:, :, 0] *= resize_ratio_3_x
                     text_polys[:, :, 1] *= resize_ratio_3_y
-                    new_h, new_w, _ = im.shape
+                    new_h, new_w, _ = img.shape
                     score_map, geo_map, training_mask = generate_rbox((new_h, new_w), text_polys, text_tags)
 
                 if vis:
@@ -672,7 +689,7 @@ def generator(input_size=512, batch_size=32,
                     # axs[1].imshow(score_map)
                     # axs[1].set_xticks([])
                     # axs[1].set_yticks([])
-                    axs[0, 0].imshow(im[:, :, ::-1])
+                    axs[0, 0].imshow(img[:, :, ::-1])
                     axs[0, 0].set_xticks([])
                     axs[0, 0].set_yticks([])
                     for poly in text_polys:
@@ -700,8 +717,8 @@ def generator(input_size=512, batch_size=32,
                     plt.show()
                     plt.close()
 
-                images.append(im[:, :, ::-1].astype(np.float32))
-                image_fns.append(im_fn)
+                images.append(img[:, :, ::-1].astype(np.float32))
+                image_fns.append(fname)
                 score_maps.append(score_map[::4, ::4, np.newaxis].astype(np.float32))
                 geo_maps.append(geo_map[::4, ::4, :].astype(np.float32))
                 training_masks.append(training_mask[::4, ::4, np.newaxis].astype(np.float32))
@@ -721,7 +738,7 @@ def generator(input_size=512, batch_size=32,
 
 def get_batch(num_workers, **kwargs):
     try:
-        enqueuer = GeneratorEnqueuer(generator(**kwargs), use_multiprocessing=True)
+        enqueuer = GeneratorEnqueuer(generator(**kwargs), use_multiprocessing=False)
         print('Generator use 10 batches for buffering, this may take a while, you can tune this yourself.')
         enqueuer.start(max_queue_size=10, workers=num_workers)
         generator_output = None
@@ -741,4 +758,6 @@ def get_batch(num_workers, **kwargs):
 
 
 if __name__ == '__main__':
-    pass
+    gen = generator()
+    items = next(gen)
+    print()
