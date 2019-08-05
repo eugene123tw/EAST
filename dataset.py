@@ -39,8 +39,6 @@ tf.app.flags.DEFINE_integer('min_text_size', 10,
 tf.app.flags.DEFINE_float('min_crop_side_ratio', 0.1,
                           'when doing random crop from input image, the'
                           'min length of min(H, W')
-tf.app.flags.DEFINE_string('geometry', 'RBOX',
-                           'which geometry to generate, RBOX or QUAD')
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -378,11 +376,7 @@ def generator(input_size=512, batch_size=32, background_ratio=3. / 8, random_sca
     index = np.arange(0, image_list.shape[0])
     while True:
         np.random.shuffle(index)
-        images = []
-        image_fns = []
-        score_maps = []
-        geo_maps = []
-        training_masks = []
+        images, fnames, score_maps, geo_maps, training_masks = [], [], [], [], []
         for i in index:
             try:
                 fname = image_list[i]
@@ -480,18 +474,18 @@ def generator(input_size=512, batch_size=32, background_ratio=3. / 8, random_sca
                     plt.close()
 
                 images.append(img[:, :, ::-1].astype(np.float32))
-                image_fns.append(fname)
+                fnames.append(fname)
                 score_maps.append(score_map[::4, ::4, np.newaxis].astype(np.float32))
                 geo_maps.append(geo_map[::4, ::4, :].astype(np.float32))
                 training_masks.append(training_mask[::4, ::4, np.newaxis].astype(np.float32))
 
                 if len(images) == batch_size:
-                    yield images, image_fns, score_maps, geo_maps, training_masks
-                    images = []
-                    image_fns = []
-                    score_maps = []
-                    geo_maps = []
-                    training_masks = []
+                    yield np.stack(images), \
+                          np.stack(fnames), \
+                          np.stack(score_maps), \
+                          np.stack(geo_maps), \
+                          np.stack(training_masks)
+                    images, fnames, score_maps, geo_maps, training_masks = [], [], [], [], []
             except Exception as e:
                 import traceback
                 traceback.print_exc()
