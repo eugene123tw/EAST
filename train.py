@@ -16,7 +16,7 @@ tf.app.flags.DEFINE_integer('save_summary_steps', 100, '')
 tf.app.flags.DEFINE_string('pretrained_model_path', None, '')
 
 import model
-import misc
+import dataset
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -117,7 +117,7 @@ def main(argv=None):
             if FLAGS.pretrained_model_path is not None:
                 variable_restore_op(sess)
 
-        data_generator = misc.get_batch(num_workers=FLAGS.num_readers, input_size=FLAGS.input_size, batch_size=FLAGS.batch_size)
+        data_generator = dataset.get_batch(num_workers=FLAGS.num_readers, input_size=FLAGS.input_size, batch_size=FLAGS.batch_size)
 
         start = time.time()
         for step in range(FLAGS.max_steps):
