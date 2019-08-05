@@ -1,7 +1,11 @@
 import time
+
 import numpy as np
 import tensorflow as tf
 from tensorflow.contrib import slim
+
+import dataset
+import model
 
 tf.app.flags.DEFINE_integer('input_size', 512, '')
 tf.app.flags.DEFINE_integer('batch_size', 14, '')
@@ -15,10 +19,8 @@ tf.app.flags.DEFINE_integer('save_checkpoint_steps', 1000, '')
 tf.app.flags.DEFINE_integer('save_summary_steps', 100, '')
 tf.app.flags.DEFINE_string('pretrained_model_path', None, '')
 
-import model
-import dataset
-
 FLAGS = tf.app.flags.FLAGS
+
 
 def loss(images, score_maps, geo_maps, training_masks):
     """
@@ -79,7 +81,6 @@ def average_gradients(tower_grads):
 
 
 def main(argv=None):
-
     if not tf.gfile.Exists(FLAGS.checkpoint_path):
         tf.gfile.MkDir(FLAGS.checkpoint_path)
 
@@ -89,7 +90,8 @@ def main(argv=None):
     input_training_masks_ph = tf.placeholder(tf.float32, shape=[None, None, None, 1], name='input_training_masks')
 
     global_step = tf.get_variable('global_step', [], initializer=tf.constant_initializer(0), trainable=False)
-    learning_rate = tf.train.exponential_decay(FLAGS.lr, global_step, decay_steps=10000, decay_rate=0.94, staircase=True)
+    learning_rate = tf.train.exponential_decay(FLAGS.lr, global_step, decay_steps=10000, decay_rate=0.94,
+                                               staircase=True)
 
     # add summary
     tf.summary.scalar('learning_rate', learning_rate)
@@ -123,7 +125,8 @@ def main(argv=None):
     init = tf.global_variables_initializer()
 
     if FLAGS.pretrained_model_path is not None:
-        variable_restore_op = slim.assign_from_checkpoint_fn(FLAGS.pretrained_model_path, slim.get_trainable_variables(),
+        variable_restore_op = slim.assign_from_checkpoint_fn(FLAGS.pretrained_model_path,
+                                                             slim.get_trainable_variables(),
                                                              ignore_missing_vars=True)
 
     with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as sess:
@@ -142,20 +145,21 @@ def main(argv=None):
         for step in range(FLAGS.max_steps):
             images, fnames, score_maps, geo_maps, training_masks = next(data_generator)
             model_loss, total_loss, _ = sess.run([model_loss_op, total_loss_op, train_op],
-                                 feed_dict={input_images_ph: images,
-                                            input_score_maps_ph: score_maps,
-                                            input_geo_maps_ph: geo_maps,
-                                            input_training_masks_ph: training_masks})
+                                                 feed_dict={input_images_ph: images,
+                                                            input_score_maps_ph: score_maps,
+                                                            input_geo_maps_ph: geo_maps,
+                                                            input_training_masks_ph: training_masks})
             if np.isnan(total_loss):
                 print('Loss diverged, stop training')
                 break
 
             if step % 10 == 0:
-                avg_time_per_step = (time.time() - start)/10
-                avg_examples_per_second = (10 * FLAGS.batch_size)/(time.time() - start)
+                avg_time_per_step = (time.time() - start) / 10
+                avg_examples_per_second = (10 * FLAGS.batch_size) / (time.time() - start)
                 start = time.time()
-                print('Step {:06d}, model loss {:.4f}, total loss {:.4f}, {:.2f} seconds/step, {:.2f} examples/second'.format(
-                    step, model_loss, total_loss, avg_time_per_step, avg_examples_per_second))
+                print(
+                    'Step {:06d}, model loss {:.4f}, total loss {:.4f}, {:.2f} seconds/step, {:.2f} examples/second'.format(
+                        step, model_loss, total_loss, avg_time_per_step, avg_examples_per_second))
 
             if step % FLAGS.save_checkpoint_steps == 0:
                 saver.save(sess, FLAGS.checkpoint_path + 'model.ckpt', global_step=global_step)
@@ -163,10 +167,11 @@ def main(argv=None):
             if step % FLAGS.save_summary_steps == 0:
                 _, total_loss, summary_str = sess.run([train_op, total_loss_op, summary_op],
                                                       feed_dict={input_images_ph: images,
-                                                                input_score_maps_ph: score_maps,
-                                                                input_geo_maps_ph: geo_maps,
-                                                                input_training_masks_ph: training_masks})
+                                                                 input_score_maps_ph: score_maps,
+                                                                 input_geo_maps_ph: geo_maps,
+                                                                 input_training_masks_ph: training_masks})
                 summary_writer.add_summary(summary_str, global_step=step)
+
 
 if __name__ == '__main__':
     tf.app.run()
