@@ -22,7 +22,7 @@ tf.app.flags.DEFINE_string('pretrained_model_path', None, '')
 FLAGS = tf.app.flags.FLAGS
 
 
-def loss(images, score_maps, geo_maps, training_masks):
+def multi_loss(images, score_maps, geo_maps, training_masks):
     """
 
     Args:
@@ -99,7 +99,7 @@ def main(argv=None):
 
     with tf.device('/gpu:0'):
         with tf.name_scope('model_0') as scope:
-            total_loss_op, model_loss_op, tensors = loss(
+            total_loss_op, model_loss_op, tensors = multi_loss(
                 input_images_ph,
                 input_score_maps_ph,
                 input_geo_maps_ph,
