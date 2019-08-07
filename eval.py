@@ -14,7 +14,7 @@ tf.app.flags.DEFINE_string('output_dir', '/tmp/ch4_test_images/images/', '')
 tf.app.flags.DEFINE_bool('no_write_images', False, 'do not write images')
 
 import model
-from dataset import restore_rectangle
+from dataset import restore_rectangle_rbox
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -91,7 +91,7 @@ def detect(score_map, geo_map, timer, score_map_thresh=0.8, box_thresh=0.1, nms_
     # restore
     start = time.time()
 
-    text_box_restored = restore_rectangle(xy_text[:, ::-1]*4, geo_map[xy_text[:, 0], xy_text[:, 1], :]) # N*4*2
+    text_box_restored = restore_rectangle_rbox(xy_text[:, ::-1]*4, geo_map[xy_text[:, 0], xy_text[:, 1], :]) # N*4*2
     print('{} text boxes before nms'.format(text_box_restored.shape[0]))
 
     boxes = np.zeros((text_box_restored.shape[0], 9), dtype=np.float32)
