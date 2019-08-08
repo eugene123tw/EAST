@@ -13,7 +13,6 @@ from shapely.geometry import Polygon
 
 from geometry import *
 
-
 tf.app.flags.DEFINE_string('training_image_path',
                            '/home/eugene/_DATASETS/scene_text/icdar_2015/train',
                            'training images')
@@ -155,19 +154,33 @@ def crop_area(img, polys, hard_text_tags, crop_background=False, max_tries=50):
     return img, polys, hard_text_tags
 
 
-def restore_rectangle_rbox(origin, geometry):
-    d = geometry[:, :4]
-    angle = geometry[:, 4]
-    # for angle > 0
-    origin_0 = origin[angle >= 0]
-    d_0 = d[angle >= 0]
-    angle_0 = angle[angle >= 0]
-    if origin_0.shape[0] > 0:
+def restore_rectangle_rbox(coords, flatten_geo_map):
+    """
+
+    Args:
+        coords (np.ndarray): (x, y) coordinate where confidence is larger than threshold (default: 0.8)
+        flatten_geo_map (np.ndarray):
+            Values are from RBOX geometry map where score > threshold.
+            The 5 channels represent the sequence as (top, right, bottom, left, angle).
+            The first 4 channels are the distances of each pixel to rectangle boundaries
+    Returns:
+
+    """
+    distances = flatten_geo_map[:, :4]
+    angles = flatten_geo_map[:, 4]
+
+    # for angle > 0 ===========================
+    coords_0 = coords[angles >= 0]
+    d_0 = distances[angles >= 0]
+    angle_0 = angles[angles >= 0]
+
+    # boxes that have angle > 0
+    if coords_0.shape[0] > 0:
         p = np.array([np.zeros(d_0.shape[0]), -d_0[:, 0] - d_0[:, 2],
                       d_0[:, 1] + d_0[:, 3], -d_0[:, 0] - d_0[:, 2],
                       d_0[:, 1] + d_0[:, 3], np.zeros(d_0.shape[0]),
                       np.zeros(d_0.shape[0]), np.zeros(d_0.shape[0]),
-                      d_0[:, 3], -d_0[:, 2]])
+                      d_0[:, 3], -d_0[:, 2]]) # center coordinates
         p = p.transpose((1, 0)).reshape((-1, 5, 2))  # N*5*2
 
         rotate_matrix_x = np.array([np.cos(angle_0), np.sin(angle_0)]).transpose((1, 0))
@@ -181,21 +194,24 @@ def restore_rectangle_rbox(origin, geometry):
 
         p_rotate = np.concatenate([p_rotate_x, p_rotate_y], axis=2)  # N*5*2
 
-        p3_in_origin = origin_0 - p_rotate[:, 4, :]
+        p3_in_origin = coords_0 - p_rotate[:, 4, :]
         new_p0 = p_rotate[:, 0, :] + p3_in_origin  # N*2
         new_p1 = p_rotate[:, 1, :] + p3_in_origin
         new_p2 = p_rotate[:, 2, :] + p3_in_origin
         new_p3 = p_rotate[:, 3, :] + p3_in_origin
 
-        new_p_0 = np.concatenate([new_p0[:, np.newaxis, :], new_p1[:, np.newaxis, :],
+        boxes_angle_positive = np.concatenate([new_p0[:, np.newaxis, :], new_p1[:, np.newaxis, :],
                                   new_p2[:, np.newaxis, :], new_p3[:, np.newaxis, :]], axis=1)  # N*4*2
     else:
-        new_p_0 = np.zeros((0, 4, 2))
-    # for angle < 0
-    origin_1 = origin[angle < 0]
-    d_1 = d[angle < 0]
-    angle_1 = angle[angle < 0]
-    if origin_1.shape[0] > 0:
+        boxes_angle_positive = np.zeros((0, 4, 2))
+    # ===========================================
+
+    # boxes that have angle < 0
+    # for angle < 0 =============================
+    coords_1 = coords[angles < 0]
+    d_1 = distances[angles < 0]
+    angle_1 = angles[angles < 0]
+    if coords_1.shape[0] > 0:
         p = np.array([-d_1[:, 1] - d_1[:, 3], -d_1[:, 0] - d_1[:, 2],
                       np.zeros(d_1.shape[0]), -d_1[:, 0] - d_1[:, 2],
                       np.zeros(d_1.shape[0]), np.zeros(d_1.shape[0]),
@@ -214,24 +230,27 @@ def restore_rectangle_rbox(origin, geometry):
 
         p_rotate = np.concatenate([p_rotate_x, p_rotate_y], axis=2)  # N*5*2
 
-        p3_in_origin = origin_1 - p_rotate[:, 4, :]
+        p3_in_origin = coords_1 - p_rotate[:, 4, :]
         new_p0 = p_rotate[:, 0, :] + p3_in_origin  # N*2
         new_p1 = p_rotate[:, 1, :] + p3_in_origin
         new_p2 = p_rotate[:, 2, :] + p3_in_origin
         new_p3 = p_rotate[:, 3, :] + p3_in_origin
 
-        new_p_1 = np.concatenate([new_p0[:, np.newaxis, :], new_p1[:, np.newaxis, :],
+        boxes_angle_negative = np.concatenate([new_p0[:, np.newaxis, :], new_p1[:, np.newaxis, :],
                                   new_p2[:, np.newaxis, :], new_p3[:, np.newaxis, :]], axis=1)  # N*4*2
     else:
-        new_p_1 = np.zeros((0, 4, 2))
-    return np.concatenate([new_p_0, new_p_1])
+        boxes_angle_negative = np.zeros((0, 4, 2))
+    # ==========================================
+
+    # stack all boxes
+    return np.concatenate([boxes_angle_positive, boxes_angle_negative])
 
 
-def generate_masks(im_size, polys, hard_text_tags):
+def generate_masks(img_size, polys, hard_text_tags):
     """
 
     Args:
-        im_size:
+        img_size (tuple): (height, width, channel)
         polys:
         hard_text_tags:
 
@@ -239,7 +258,7 @@ def generate_masks(im_size, polys, hard_text_tags):
         return polygon score map, geometric map and training_mask
     """
 
-    h, w = im_size
+    h, w, c = img_size
     poly_mask = np.zeros((h, w), dtype=np.uint8)
     score_map = np.zeros((h, w), dtype=np.uint8)
     geo_map = np.zeros((h, w, 5), dtype=np.float32)
@@ -271,8 +290,9 @@ def generate_masks(im_size, polys, hard_text_tags):
         if hard_text:
             cv2.fillPoly(training_mask, poly.astype(np.int32)[np.newaxis, :, :], 0)
 
+        # generate a parallelogram for any combination of two vertices
         fitted_parallelograms = []
-        for i in range(4):
+        for i in range(4):  # top, right, bottom, left
             p0 = poly[i]
             p1 = poly[(i + 1) % 4]
             p2 = poly[(i + 2) % 4]
@@ -283,13 +303,13 @@ def generate_masks(im_size, polys, hard_text_tags):
 
             # ========================================================================
             if point_dist_to_line(p0, p1, p2) > point_dist_to_line(p0, p1, p3):
-                # 平行线经过p2 - parallel lines through p2
+                # parallel lines through p2
                 if edge[1] == 0:
                     edge_opposite = [1, 0, -p2[0]]
                 else:
                     edge_opposite = [edge[0], -1, p2[1] - edge[0] * p2[0]]
             else:
-                # 经过p3 - after p3
+                # parallel lines through p3
                 if edge[1] == 0:
                     edge_opposite = [1, 0, -p3[0]]
                 else:
@@ -373,7 +393,21 @@ def generate_masks(im_size, polys, hard_text_tags):
     return score_map, geo_map, training_mask
 
 
-def generator(input_size=512, batch_size=32, background_ratio=3. / 8, random_scale=[0.5, 1, 2.0, 3.0], vis=False):
+def pad_image(img, input_size):
+    # pad the image to the training input size or the longer side of image
+    h, w, _ = img.shape
+    max_side = np.max([h, w, input_size])
+    img_padded = np.zeros((max_side, max_side, 3), dtype=np.uint8)
+    img_padded[:h, :w, :] = img.copy()
+    return img_padded
+
+
+def generator(input_size=512,
+              batch_size=32,
+              background_ratio=3. / 8,
+              # background_ratio=0,
+              random_scale=[0.5, 1, 2.0, 3.0],
+              vis=False):
     image_list = np.array(get_images())
     print('{} training images in {}'.format(image_list.shape[0], FLAGS.training_image_path))
     index = np.arange(0, image_list.shape[0])
@@ -381,7 +415,7 @@ def generator(input_size=512, batch_size=32, background_ratio=3. / 8, random_sca
     while True:
 
         np.random.shuffle(index)
-        images, fnames, score_maps, geo_maps, training_masks = [], [], [], [], []
+        padded_images, fnames, score_maps, geo_maps, training_masks = [], [], [], [], []
 
         for i in index:
             fname = image_list[i]
@@ -415,9 +449,9 @@ def generator(input_size=512, batch_size=32, background_ratio=3. / 8, random_sca
                 # pad and resize image
                 new_h, new_w, _ = img.shape
                 max_h_w_i = np.max([new_h, new_w, input_size])
-                im_padded = np.zeros((max_h_w_i, max_h_w_i, 3), dtype=np.uint8)
-                im_padded[:new_h, :new_w, :] = img.copy()
-                img = cv2.resize(im_padded, dsize=(input_size, input_size))
+                padded_img = np.zeros((max_h_w_i, max_h_w_i, 3), dtype=np.uint8)
+                padded_img[:new_h, :new_w, :] = img.copy()
+                padded_img = cv2.resize(padded_img, dsize=(input_size, input_size))
                 score_map = np.zeros((input_size, input_size), dtype=np.uint8)
                 geo_map = np.zeros((input_size, input_size, 5), dtype=np.float32)  # only support RBOX
                 training_mask = np.ones((input_size, input_size), dtype=np.uint8)
@@ -427,30 +461,20 @@ def generator(input_size=512, batch_size=32, background_ratio=3. / 8, random_sca
                 if text_polys.shape[0] == 0:
                     continue
 
-                h, w, _ = img.shape
-
-                # pad the image to the training input size or the longer side of image
-                new_h, new_w, _ = img.shape
-                max_h_w_i = np.max([new_h, new_w, input_size])
-                im_padded = np.zeros((max_h_w_i, max_h_w_i, 3), dtype=np.uint8)
-                im_padded[:new_h, :new_w, :] = img.copy()
-                img = im_padded
+                padded_img = pad_image(img, input_size)
 
                 # resize the image to input size
-                new_h, new_w, _ = img.shape
-                resize_h = input_size
-                resize_w = input_size
-                img = cv2.resize(img, dsize=(resize_w, resize_h))
-                resize_ratio_3_x = resize_w / float(new_w)
-                resize_ratio_3_y = resize_h / float(new_h)
-                text_polys[:, :, 0] *= resize_ratio_3_x
-                text_polys[:, :, 1] *= resize_ratio_3_y
-                new_h, new_w, _ = img.shape
-                score_map, geo_map, training_mask = generate_masks((new_h, new_w), text_polys, hard_text_tags)
+                h, w, _ = padded_img.shape
+                padded_img = cv2.resize(padded_img, dsize=(input_size, input_size))
+                resize_w_ratio = input_size / float(w)
+                resize_h_ratio = input_size / float(h)
+                text_polys[:, :, 0] *= resize_w_ratio
+                text_polys[:, :, 1] *= resize_h_ratio
+                score_map, geo_map, training_mask = generate_masks(padded_img.shape, text_polys, hard_text_tags)
 
             if vis:
                 fig, axs = plt.subplots(3, 2, figsize=(20, 30))
-                axs[0, 0].imshow(img[:, :, ::-1])
+                axs[0, 0].imshow(padded_img[:, :, ::-1])
                 axs[0, 0].set_xticks([])
                 axs[0, 0].set_yticks([])
                 for poly in text_polys:
@@ -478,21 +502,21 @@ def generator(input_size=512, batch_size=32, background_ratio=3. / 8, random_sca
                 plt.show()
                 plt.close()
 
-            images.append(img[:, :, ::-1].astype(np.float32))
+            padded_images.append(padded_img[:, :, ::-1].astype(np.float32))
             fnames.append(fname)
             score_maps.append(score_map[::4, ::4, np.newaxis].astype(np.float32))
             geo_maps.append(geo_map[::4, ::4, :].astype(np.float32))
             training_masks.append(training_mask[::4, ::4, np.newaxis].astype(np.float32))
 
-            if len(images) == batch_size:
-                yield np.stack(images), \
+            if len(padded_images) == batch_size:
+                yield np.stack(padded_images), \
                       np.stack(fnames), \
                       np.stack(score_maps), \
                       np.stack(geo_maps), \
                       np.stack(training_masks)
-                images, fnames, score_maps, geo_maps, training_masks = [], [], [], [], []
+                padded_images, fnames, score_maps, geo_maps, training_masks = [], [], [], [], []
 
 
 if __name__ == '__main__':
-    loader = generator(input_size=512, batch_size=8)
+    loader = generator(input_size=512, batch_size=8, vis=True)
     print(next(loader))

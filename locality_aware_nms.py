@@ -3,12 +3,12 @@ from shapely.geometry import Polygon
 
 
 def intersection(g, p):
-    g = Polygon(g[:8].reshape((4, 2)))
-    p = Polygon(p[:8].reshape((4, 2)))
-    if not g.is_valid or not p.is_valid:
+    g_polygon = Polygon(g[:8].reshape((4, 2)))
+    p_polygon = Polygon(p[:8].reshape((4, 2)))
+    if not g_polygon.is_valid or not p_polygon.is_valid:
         return 0
-    inter = Polygon(g).intersection(Polygon(p)).area
-    union = g.area + p.area - inter
+    inter = Polygon(g_polygon).intersection(Polygon(p_polygon)).area
+    union = g_polygon.area + p_polygon.area - inter
     if union == 0:
         return 0
     else:

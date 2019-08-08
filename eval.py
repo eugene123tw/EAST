@@ -8,13 +8,15 @@ import tensorflow as tf
 import locality_aware_nms as nms_locality
 import lanms
 
-tf.app.flags.DEFINE_string('test_data_path', '/tmp/ch4_test_images/images/', '')
-tf.app.flags.DEFINE_string('checkpoint_path', '/tmp/east_icdar2015_resnet_v1_50_rbox/', '')
-tf.app.flags.DEFINE_string('output_dir', '/tmp/ch4_test_images/images/', '')
-tf.app.flags.DEFINE_bool('no_write_images', False, 'do not write images')
-
 import model
 from dataset import restore_rectangle_rbox
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+tf.app.flags.DEFINE_string('test_data_path', '/home/eugene/_DATASETS/test/img', '')
+tf.app.flags.DEFINE_string('checkpoint_path', '/home/eugene/_MODELS/scene_text/east/east_icdar2015_resnet_v1_50_rbox', '')
+tf.app.flags.DEFINE_string('output_dir', '/home/eugene/_DATASETS/test/out_img', '')
+tf.app.flags.DEFINE_bool('no_write_images', False, 'do not write images')
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -35,7 +37,7 @@ def get_images():
     return files
 
 
-def resize_image(im, max_side_len=2400):
+def resize_input_image(im, max_side_len=2400):
     '''
     resize image to a size multiple of 32 which is required by the network
     :param im: the resized image
@@ -73,8 +75,8 @@ def detect(score_map, geo_map, timer, score_map_thresh=0.8, box_thresh=0.1, nms_
     :param score_map:
     :param geo_map:
     :param timer:
-    :param score_map_thresh: threshhold for score map
-    :param box_thresh: threshhold for boxes
+    :param score_map_thresh: threshold for score map
+    :param box_thresh: threshold for boxes
     :param nms_thres: threshold for nms
     :return:
     '''
@@ -83,28 +85,37 @@ def detect(score_map, geo_map, timer, score_map_thresh=0.8, box_thresh=0.1, nms_
         geo_map = geo_map[0, :, :, ]
 
     # filter the score map
-    xy_text = np.argwhere(score_map > score_map_thresh)
+    xy_coords = np.argwhere(score_map > score_map_thresh)
 
     # sort the text boxes via the y axis
-    xy_text = xy_text[np.argsort(xy_text[:, 0])]
+    xy_coords = xy_coords[np.argsort(xy_coords[:, 0])]
 
     # restore
     start = time.time()
 
-    text_box_restored = restore_rectangle_rbox(xy_text[:, ::-1]*4, geo_map[xy_text[:, 0], xy_text[:, 1], :]) # N*4*2
+    # Flip (y, x) to (x, y) and upsize 4 (network downsized by 4).
+    # so xy_text[:, ::-1] * 4
+    text_box_restored = restore_rectangle_rbox(xy_coords[:, ::-1] * 4, geo_map[xy_coords[:, 0], xy_coords[:, 1], :])
     print('{} text boxes before nms'.format(text_box_restored.shape[0]))
+
+    mask = np.zeros((score_map.shape[0] * 4, score_map.shape[1] * 4, 1), dtype=np.uint8)
+    for i, box in enumerate(text_box_restored):
+        cv2.fillPoly(mask, box.astype(np.int32)[np.newaxis, :, :], i+10)
+        cv2.imshow('debug', mask)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
 
     boxes = np.zeros((text_box_restored.shape[0], 9), dtype=np.float32)
     boxes[:, :8] = text_box_restored.reshape((-1, 8))
-    boxes[:, 8] = score_map[xy_text[:, 0], xy_text[:, 1]]
+    boxes[:, 8] = score_map[xy_coords[:, 0], xy_coords[:, 1]]
 
     timer['restore'] = time.time() - start
 
     # nms part
     start = time.time()
 
-    # boxes = nms_locality.nms_locality(boxes.astype(np.float64), nms_thres)
-    boxes = lanms.merge_quadrangle_n9(boxes.astype('float32'), nms_thres)
+    boxes = nms_locality.nms_locality(boxes.astype(np.float64), nms_thres)
+    # boxes = lanms.merge_quadrangle_n9(boxes.astype('float32'), nms_thres)
     timer['nms'] = time.time() - start
 
     if boxes.shape[0] == 0:
@@ -157,11 +168,13 @@ def main(argv=None):
             for im_fn in im_fn_list:
                 im = cv2.imread(im_fn)[:, :, ::-1]
                 start_time = time.time()
-                im_resized, (ratio_h, ratio_w) = resize_image(im)
+
+                # resize the image so that the input image size is the multiple of 32 (downsize)
+                input_image, (ratio_h, ratio_w) = resize_input_image(im)
 
                 timer = {'net': 0, 'restore': 0, 'nms': 0}
                 start = time.time()
-                score, geometry = sess.run([f_score, f_geometry], feed_dict={input_images: [im_resized]})
+                score, geometry = sess.run([f_score, f_geometry], feed_dict={input_images: [input_image]})
                 timer['net'] = time.time() - start
 
                 boxes, timer = detect(score_map=score, geo_map=geometry, timer=timer)
