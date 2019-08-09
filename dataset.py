@@ -154,8 +154,11 @@ def crop_area(img, polys, hard_text_tags, crop_background=False, max_tries=50):
     return img, polys, hard_text_tags
 
 
-def restore_rectangle_rbox(coords, flatten_geo_map):
-    """
+def restore_rectangle_rbox(coords, flatten_geo_map, shape):
+    """ This function builds polygon candidates for each valid coordinates on score map.
+
+    Basically each point in `coords` forms a Polygon, since there is a geometry map representing the predicted
+    distances to 4-edges for each valid coordinate.
 
     Args:
         coords (np.ndarray): (x, y) coordinate where confidence is larger than threshold (default: 0.8)
@@ -180,7 +183,7 @@ def restore_rectangle_rbox(coords, flatten_geo_map):
                       d_0[:, 1] + d_0[:, 3], -d_0[:, 0] - d_0[:, 2],
                       d_0[:, 1] + d_0[:, 3], np.zeros(d_0.shape[0]),
                       np.zeros(d_0.shape[0]), np.zeros(d_0.shape[0]),
-                      d_0[:, 3], -d_0[:, 2]]) # center coordinates
+                      d_0[:, 3], -d_0[:, 2]]) # bottom-left
         p = p.transpose((1, 0)).reshape((-1, 5, 2))  # N*5*2
 
         rotate_matrix_x = np.array([np.cos(angle_0), np.sin(angle_0)]).transpose((1, 0))
@@ -242,6 +245,13 @@ def restore_rectangle_rbox(coords, flatten_geo_map):
         boxes_angle_negative = np.zeros((0, 4, 2))
     # ==========================================
 
+    # for i, box in enumerate(np.concatenate([boxes_angle_positive, boxes_angle_negative])):
+    #     mask = np.zeros((shape[0] * 4, shape[1] * 4, 1), dtype=np.uint8)
+    #     cv2.fillPoly(mask, box.astype(np.int32)[np.newaxis, :, :], 200)
+    #     cv2.imshow('debug', mask)
+    #     cv2.waitKey(10)
+    # cv2.destroyAllWindows()
+
     # stack all boxes
     return np.concatenate([boxes_angle_positive, boxes_angle_negative])
 
@@ -272,12 +282,12 @@ def generate_masks(img_size, polys, hard_text_tags):
         r = [min(np.linalg.norm(poly[i] - poly[(i + 1) % 4]), np.linalg.norm(poly[i] - poly[(i - 1) % 4])) for i in
              range(4)]
 
-        # assign shrink polygon to score map as 1
-        shrinked_poly = shrink_poly(poly.copy(), r).astype(np.int32)[np.newaxis, :, :]
-        cv2.fillPoly(score_map, shrinked_poly, 1)
+        # assign shrunk polygon to score map as 1
+        shrunk_poly = shrink_poly(poly.copy(), r).astype(np.int32)[np.newaxis, :, :]
+        cv2.fillPoly(score_map, shrunk_poly, 1)
 
         # get polygon label map
-        cv2.fillPoly(poly_mask, shrinked_poly, poly_idx + 1)
+        cv2.fillPoly(poly_mask, shrunk_poly, poly_idx + 1)
         xy_in_poly = np.argwhere(poly_mask == (poly_idx + 1))
 
         # if the poly is too small or if the word is too blur, then ignore it in training

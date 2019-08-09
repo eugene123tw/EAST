@@ -13,9 +13,9 @@ from dataset import restore_rectangle_rbox
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-tf.app.flags.DEFINE_string('test_data_path', '/home/eugene/_DATASETS/test/img', '')
-tf.app.flags.DEFINE_string('checkpoint_path', '/home/eugene/_MODELS/scene_text/east/east_icdar2015_resnet_v1_50_rbox', '')
-tf.app.flags.DEFINE_string('output_dir', '/home/eugene/_DATASETS/test/out_img', '')
+tf.app.flags.DEFINE_string('test_data_path', '/home/eugene/_DATASETS/scene_text/test/img', '')
+tf.app.flags.DEFINE_string('checkpoint_path', '/home/eugene/_MODELS/east_icdar2015_resnet_v1_50_rbox', '')
+tf.app.flags.DEFINE_string('output_dir', '/home/eugene/_DATASETS/scene_text/test/out', '')
 tf.app.flags.DEFINE_bool('no_write_images', False, 'do not write images')
 
 FLAGS = tf.app.flags.FLAGS
@@ -95,15 +95,18 @@ def detect(score_map, geo_map, timer, score_map_thresh=0.8, box_thresh=0.1, nms_
 
     # Flip (y, x) to (x, y) and upsize 4 (network downsized by 4).
     # so xy_text[:, ::-1] * 4
-    text_box_restored = restore_rectangle_rbox(xy_coords[:, ::-1] * 4, geo_map[xy_coords[:, 0], xy_coords[:, 1], :])
+    text_box_restored = restore_rectangle_rbox(
+        xy_coords[:, ::-1] * 4,
+        geo_map[xy_coords[:, 0], xy_coords[:, 1], :],
+        score_map.shape)
     print('{} text boxes before nms'.format(text_box_restored.shape[0]))
 
-    mask = np.zeros((score_map.shape[0] * 4, score_map.shape[1] * 4, 1), dtype=np.uint8)
-    for i, box in enumerate(text_box_restored):
-        cv2.fillPoly(mask, box.astype(np.int32)[np.newaxis, :, :], i+10)
-        cv2.imshow('debug', mask)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
+    # mask = np.zeros((score_map.shape[0] * 4, score_map.shape[1] * 4, 1), dtype=np.uint8)
+    # for i, box in enumerate(text_box_restored):
+    #     cv2.fillPoly(mask, box.astype(np.int32)[np.newaxis, :, :], i+10)
+    #     cv2.imshow('debug', mask)
+    #     cv2.waitKey(0)
+    #     cv2.destroyAllWindows()
 
     boxes = np.zeros((text_box_restored.shape[0], 9), dtype=np.float32)
     boxes[:, :8] = text_box_restored.reshape((-1, 8))
@@ -121,7 +124,7 @@ def detect(score_map, geo_map, timer, score_map_thresh=0.8, box_thresh=0.1, nms_
     if boxes.shape[0] == 0:
         return None, timer
 
-    # here we filter some low score boxes by the average score map, this is different from the orginal paper
+    # here we filter some low score boxes by the average score map, this is different from the original paper
     for i, box in enumerate(boxes):
         mask = np.zeros_like(score_map, dtype=np.uint8)
         cv2.fillPoly(mask, box[:8].reshape((-1, 4, 2)).astype(np.int32) // 4, 1)
